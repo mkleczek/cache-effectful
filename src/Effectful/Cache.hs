@@ -26,6 +26,7 @@ module Effectful.Cache
   , filterWithKey
   , memoize
   , memoize'
+  , module System.Clock
   ) where
 
 import Control.Monad.IO.Class
