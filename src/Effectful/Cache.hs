@@ -80,10 +80,10 @@ memoize :: forall k v es. (Hashable k, Cache k v :> es)
   => (k -> Eff es v)
   -> k
   -> Eff es v
-memoize = memoize' $ const . const Nothing
+memoize = memoize' $ const . const $ pure Nothing
 
 memoize' :: forall k v es. (Hashable k, Cache k v :> es)
-  => (k -> v -> Maybe TimeSpec)
+  => (k -> v -> Eff es (Maybe TimeSpec))
   -> (k -> Eff es v)
   -> k
   -> Eff es v
@@ -93,7 +93,8 @@ memoize' timeSpecOf compute key = do
     Just value -> pure value
     Nothing    -> do
       computed <- compute key
-      insert' (timeSpecOf key computed) key computed
+      timeSpec <- timeSpecOf key computed
+      insert' timeSpec key computed
       pure computed
 
 -- | Insert an item in the cache, using the default expiration value of the cache.
