@@ -19,10 +19,13 @@ module Effectful.Cache
   , runCacheIO
     -- * Cache operations
   , insert
+  , insert'
   , lookup
   , keys
   , delete
   , filterWithKey
+  , memoize
+  , memoize'
   ) where
 
 import Control.Monad.IO.Class
@@ -32,6 +35,7 @@ import Prelude hiding (lookup)
 import qualified Data.Cache as C
 import Effectful
 import Effectful.Dispatch.Dynamic (interpret, send)
+import System.Clock
 
 -- | Operations on a cache
 --
@@ -48,6 +52,8 @@ data Cache k v :: Effect where
   Keys   :: Cache k v m [k]
   Delete :: (Eq k, Hashable k) => k -> Cache k v m ()
   FilterWithKey :: (Eq k, Hashable k) => (k -> v -> Bool) -> Cache k v m ()
+  InsertTimed :: (Eq k, Hashable k) => Maybe TimeSpec -> k -> v -> Cache k v m ()
+--  MemoizeTimed :: (Eq k, Hashable k) => (k -> Eff es v) -> (k -> v -> Maybe TimeSpec) -> Cache k v m ()
 
 -- |
 -- @since 0.0.1.0
@@ -67,6 +73,27 @@ runCacheIO cache = interpret $ \_ -> \case
   Keys              -> liftIO $ C.keys cache
   Delete key        -> liftIO $ C.delete cache key
   FilterWithKey fun -> liftIO $ C.filterWithKey fun cache
+  InsertTimed timeSpec key value -> liftIO $ C.insert' cache timeSpec key value
+
+memoize :: forall k v es. (Hashable k, Cache k v :> es)
+  => (k -> Eff es v)
+  -> k
+  -> Eff es v
+memoize = memoize' $ const . const Nothing
+
+memoize' :: forall k v es. (Hashable k, Cache k v :> es)
+  => (k -> v -> Maybe TimeSpec)
+  -> (k -> Eff es v)
+  -> k
+  -> Eff es v
+memoize' timeSpecOf compute key = do
+  cached <- lookup @k @v key
+  case cached of
+    Just value -> pure value
+    Nothing    -> do
+      computed <- compute key
+      insert' (timeSpecOf key computed) key computed
+      pure computed
 
 -- | Insert an item in the cache, using the default expiration value of the cache.
 --
@@ -77,6 +104,17 @@ insert :: forall (k :: Type) (v :: Type) (es :: [Effect])
        -> v -- ^ 
        -> Eff es ()
 insert key value = send $ Insert key value
+
+-- | Insert an item in the cache, using the default expiration value of the cache.
+--
+-- @since 0.0.1.0
+insert' :: forall (k :: Type) (v :: Type) (es :: [Effect])
+        . (Hashable k, Cache k v :> es)
+       => Maybe TimeSpec
+       -> k -- ^ 
+       -> v -- ^ 
+       -> Eff es ()
+insert' timeSpec key value = send $ InsertTimed timeSpec key value
 
 -- | Lookup an item with the given key, and delete it if it is expired.
 --
